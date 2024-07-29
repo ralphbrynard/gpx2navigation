@@ -92,6 +92,10 @@ jobs:
         PR_BODY="This pull request contains the analysis of the test failure along with code suggestions from OpenAI.\n\n### Suggested Changes\n\`\`\`diff\n$(git diff HEAD~1 HEAD download_routes.py)\n\`\`\`\n\n### OpenAI Analysis\n${RESPONSE_TEXT}"
         gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
 
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n${RESPONSE_TEXT}\n\`\`\`"
+
     - name: Create PR to QA branch
       if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/bugfix/') || startsWith(github.ref, 'refs/heads/request/') || startsWith(github.ref, 'refs/heads/support/'))
       env:
@@ -103,6 +107,10 @@ jobs:
         PR_BODY="This is an automatic pull request from the ${BRANCH_NAME} branch."
         gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
 
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n${RESPONSE_TEXT}\n\`\`\`"
+
     - name: Merge PR to QA branch
       if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
       run: |
@@ -110,7 +118,13 @@ jobs:
 
     - name: Create PR to dev branch
       if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
+      env:
+        GITHUB_SHA: ${{ github.sha }}
       run: |
         PR_TITLE="Merge QA changes into dev"
-        PR_BODY="This pull request merges the changes from the QA branch into the dev branch."
+        PR_BODY="This pull request merges the changes from the QA branch into the dev branch.\n\n### Changes Merged from QA\n\`\`\`diff\n$(git diff qa..${GITHUB_SHA})\n\`\`\`\n\n### 🤖 OpenAI Analysis 🤖\n$(cat openai_response.txt)"
         gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base dev --head qa
+
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n$(cat openai_response.txt)\n\`\`\`"
