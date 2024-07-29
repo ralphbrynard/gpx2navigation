@@ -9,8 +9,6 @@ on:
       - 'support/**'
   pull_request:
     branches:
-      - main
-      - dev
       - qa
 
 jobs:
