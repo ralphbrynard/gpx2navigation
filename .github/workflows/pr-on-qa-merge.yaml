@@ -1,0 +1,42 @@
+name: Create PR from QA to Dev
+
+on:
+  push:
+    branches:
+      - qa
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install GitHub CLI
+      run: |
+        sudo apt update
+        sudo apt install -y curl
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh
+
+    - name: Authenticate GitHub CLI
+      run: |
+        echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+
+    - name: Create PR to Dev branch
+      env:
+        GITHUB_SHA: ${{ github.sha }}
+      run: |
+        PR_TITLE="Merge QA changes into dev"
+        PR_BODY="This pull request merges the changes from the QA branch into the dev branch.\n\n### Changes Merged from QA\n\`\`\`diff\n$(git diff qa..${GITHUB_SHA})\n\`\`\`"
+        gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base dev --head qa
+
+        # Add comment to the PR with formatted OpenAI output if available
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        if [ -f openai_response.txt ]; then
+          gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n$(cat openai_response.txt)\n\`\`\`"
+        fi
