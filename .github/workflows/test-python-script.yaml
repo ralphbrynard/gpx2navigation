@@ -1,12 +1,15 @@
-name: Test Python Script
+name: Test and Create PR
 
 on:
   push:
     branches:
-      - dev
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'request/**'
+      - 'support/**'
   pull_request:
     branches:
-      - main
+      - qa
 
 jobs:
   test:
@@ -24,12 +27,104 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests
+        pip install requests openai
 
-    - name: Run tests
-      env:
-        CLIENT_ID: ${{ secrets.CLIENT_ID }}
-        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+    - name: Install GitHub CLI
       run: |
-        python test_download_routes.py
+        sudo apt update
+        sudo apt install -y curl
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install gh
+
+    - name: Authenticate GitHub CLI
+      run: |
+        echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+
+    - name: Run tests and capture output
+      id: run-tests
+      run: |
+        set -o pipefail
+        python test_download_routes.py 2>&1 | tee test-output.log
+
+    - name: Analyze test failures with OpenAI
+      if: failure()
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_REF: ${{ github.ref }}
+      run: |
+        TEST_OUTPUT=$(cat test-output.log)
+        PROMPT="Please analyze the following test output and provide a human-readable explanation of the errors along with suggested code changes. The relevant Python script is available here: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/download_routes.py\n\nTest output:\n\n${TEST_OUTPUT}"
+        RESPONSE=$(curl -s -X POST https://api.openai.com/v1/completions \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+          -d '{
+            "model": "text-davinci-003",
+            "prompt": "'"${PROMPT}"'",
+            "max_tokens": 1500
+          }')
+
+        RESPONSE_TEXT=$(echo "${RESPONSE}" | jq -r '.choices[0].text')
+        echo "${RESPONSE_TEXT}" > openai_response.txt
+
+        # Create a new branch for the PR
+        BRANCH_NAME="test-failure-${GITHUB_SHA}"
+        git checkout -b ${BRANCH_NAME}
+
+        # Update download_routes.py with suggestions
+        echo "${RESPONSE_TEXT}" >> download_routes.py
+
+        # Commit the changes
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+        git add download_routes.py openai_response.txt
+        git commit -m "Test failure analysis and suggestions from OpenAI"
+
+        # Push the new branch
+        git push origin ${BRANCH_NAME}
+
+        # Create a pull request to qa branch
+        PR_TITLE="Test Failure Analysis: ${GITHUB_SHA}"
+        PR_BODY="This pull request contains the analysis of the test failure along with code suggestions from OpenAI.\n\n### Suggested Changes\n\`\`\`diff\n$(git diff HEAD~1 HEAD download_routes.py)\n\`\`\`\n\n### OpenAI Analysis\n${RESPONSE_TEXT}"
+        gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
+
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n${RESPONSE_TEXT}\n\`\`\`"
+
+    - name: Create PR to QA branch
+      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/bugfix/') || startsWith(github.ref, 'refs/heads/request/') || startsWith(github.ref, 'refs/heads/support/'))
+      env:
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_REF: ${{ github.ref }}
+      run: |
+        BRANCH_NAME=$(echo ${GITHUB_REF} | sed 's/refs\/heads\///')
+        PR_TITLE="Automatic PR from ${BRANCH_NAME}"
+        PR_BODY="This is an automatic pull request from the ${BRANCH_NAME} branch."
+        gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
+
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n${RESPONSE_TEXT}\n\`\`\`"
+
+    - name: Merge PR to QA branch
+      if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
+      run: |
+        gh pr merge ${{ github.event.pull_request.number }} --merge
+
+    - name: Create PR to dev branch
+      if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
+      env:
+        GITHUB_SHA: ${{ github.sha }}
+      run: |
+        PR_TITLE="Merge QA changes into dev"
+        PR_BODY="This pull request merges the changes from the QA branch into the dev branch.\n\n### Changes Merged from QA\n\`\`\`diff\n$(git diff qa..${GITHUB_SHA})\n\`\`\`\n\n### 🤖 OpenAI Analysis 🤖\n$(cat openai_response.txt)"
+        gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base dev --head qa
+
+        # Add comment to the PR with formatted OpenAI output
+        PR_NUMBER=$(gh pr view --json number --jq '.number')
+        gh pr comment $PR_NUMBER --body "### 🤖 OpenAI Analysis 🤖\n\n\`\`\`\n$(cat openai_response.txt)\n\`\`\`"
