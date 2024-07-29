@@ -1,17 +1,17 @@
 name: Test and Create PR
 
 on:
-  pull_request:
-    branches:
-      - main
-      - dev
-      - qa
   push:
     branches:
       - 'feature/**'
       - 'bugfix/**'
       - 'request/**'
       - 'support/**'
+  pull_request:
+    branches:
+      - main
+      - dev
+      - qa
 
 jobs:
   test:
@@ -91,11 +91,11 @@ jobs:
 
         # Create a pull request to qa branch
         PR_TITLE="Test Failure Analysis: ${GITHUB_SHA}"
-        PR_BODY="This pull request contains the analysis of the test failure along with code suggestions from OpenAI.\n\n${RESPONSE_TEXT}"
+        PR_BODY="This pull request contains the analysis of the test failure along with code suggestions from OpenAI.\n\n### Suggested Changes\n\`\`\`diff\n$(git diff HEAD~1 HEAD download_routes.py)\n\`\`\`\n\n### OpenAI Analysis\n${RESPONSE_TEXT}"
         gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
 
     - name: Create PR to QA branch
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/bugfix/') || startsWith(github.ref, 'refs/heads/request/') || startsWith(github.ref, 'refs/heads/support/')
+      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/bugfix/') || startsWith(github.ref, 'refs/heads/request/') || startsWith(github.ref, 'refs/heads/support/'))
       env:
         GITHUB_SHA: ${{ github.sha }}
         GITHUB_REF: ${{ github.ref }}
@@ -105,12 +105,14 @@ jobs:
         PR_BODY="This is an automatic pull request from the ${BRANCH_NAME} branch."
         gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base qa --head ${BRANCH_NAME}
 
-    - name: Post message for incorrect branch naming
-      if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/') && !startsWith(github.ref, 'refs/heads/bugfix/') && !startsWith(github.ref, 'refs/heads/request/') && !startsWith(github.ref, 'refs/heads/support/')
+    - name: Merge PR to QA branch
+      if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
       run: |
-        AUTHOR=$(git log -1 --pretty=format:'%an')
-        MESSAGE="Hello ${AUTHOR}, your branch naming convention does not match our required format. Please follow the branch naming conventions specified in the CONTRIBUTING.md file."
-        echo $MESSAGE
-        # Post the message as a comment on the push
-        # This requires an authenticated GitHub API request (this step is just illustrative)
-        gh issue comment 1 --body "${MESSAGE}" # Adjust this command to post a comment appropriately
+        gh pr merge ${{ github.event.pull_request.number }} --merge
+
+    - name: Create PR to dev branch
+      if: github.event_name == 'pull_request' && github.base_ref == 'qa' && success()
+      run: |
+        PR_TITLE="Merge QA changes into dev"
+        PR_BODY="This pull request merges the changes from the QA branch into the dev branch."
+        gh pr create --title "${PR_TITLE}" --body "${PR_BODY}" --base dev --head qa
