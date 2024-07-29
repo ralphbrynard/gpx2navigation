@@ -27,7 +27,7 @@ class TestDownloadRoutes(unittest.TestCase):
         mock_get_access_token.assert_called_once()
         mock_fetch_routes.assert_called_once_with('mock_access_token')
         mock_download_gpx.assert_called_once_with(123, 'mock_access_token')
-        mock_save_gpx_file.assert_called_once_with({'id': 123, 'name': 'Test Route', 'distance': 10}, b'mock gpx content')
+        mock_save_gpx_file.assert_called_once_with({'id': 123, 'name': 'Test Route', 'distance': 10, 'number_of_rides': 0}, b'mock gpx content')
         mock_load_cache.assert_called_once()
         mock_save_cache.assert_called_once_with([{'id': 123, 'name': 'Test Route', 'distance': 10, 'number_of_rides': 0}])
 
