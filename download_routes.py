@@ -3,7 +3,7 @@ import json
 import os
 
 # Define the path for the configuration and cache files
-config_path = os.path.expanduser('~/Documents/config.json')
+config_path = os.path.expanduser('~/.gpx2navigation/config.json')
 cache_path = os.path.expanduser('~/Documents/strava_routes_cache.json')
 
 # Function to load configuration
