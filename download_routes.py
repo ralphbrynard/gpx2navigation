@@ -1,15 +1,21 @@
 import requests
 import json
 import os
-import sys
 
-# Retrieve API credentials from environment variables set by the Shortcuts app
-client_id = os.getenv('clientID')
-client_secret = os.getenv('clientSecret')
-refresh_token = os.getenv('refreshToken')
-
-# Define the path for cached routes
+# Define the path for the configuration and cache files
+config_path = os.path.expanduser('~/Documents/config.json')
 cache_path = os.path.expanduser('~/Documents/strava_routes_cache.json')
+
+# Function to load configuration
+def load_config():
+    with open(config_path, 'r') as file:
+        return json.load(file)
+
+# Load the configuration
+config = load_config()
+client_id = config['client_id']
+client_secret = config['client_secret']
+refresh_token = config['refresh_token']
 
 # Function to get a new access token using the refresh token
 def get_access_token():
